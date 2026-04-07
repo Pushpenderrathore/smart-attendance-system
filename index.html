@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SmartAttend v3</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0b0d12;--surface:#12151e;--card:#181c28;--border:#222840;
+      --accent:#4f8bff;--accent2:#7c3aed;--green:#22c55e;--red:#ef4444;
+      --amber:#f59e0b;--cyan:#06b6d4;--text:#e8eaf0;--muted:#6b7280;
+      --font:'Syne',sans-serif;--mono:'DM Mono',monospace;
+    }
+    body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;overflow-x:hidden}
+    body::before{content:'';position:fixed;inset:0;
+      background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+      background-size:40px 40px;opacity:.2;pointer-events:none;z-index:0}
+    #root{position:relative;z-index:1}
+    .app{max-width:500px;margin:0 auto;padding:0 16px 100px}
+
+    /* Header */
+    .header{padding:24px 0 16px;display:flex;align-items:center;justify-content:space-between}
+    .logo{display:flex;align-items:center;gap:10px}
+    .logo-icon{width:38px;height:38px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:19px;box-shadow:0 4px 16px rgba(79,139,255,.3)}
+    .logo-text{font-size:15px;font-weight:800;letter-spacing:.5px}
+    .logo-sub{font-size:10px;color:var(--muted);font-family:var(--mono);letter-spacing:1px}
+
+    /* Security chips */
+    .security-bar{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:16px}
+    .sec-chip{background:rgba(79,139,255,.07);border:1px solid rgba(79,139,255,.18);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--accent);font-family:var(--mono)}
+
+    /* Tabs */
+    .tab-bar{display:flex;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:4px;margin:14px 0 22px;gap:2px}
+    .tab{flex:1;padding:9px;border-radius:10px;border:none;background:transparent;color:var(--muted);font-family:var(--font);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;letter-spacing:.3px}
+    .tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 2px 12px rgba(79,139,255,.3)}
+
+    /* Cards */
+    .card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:24px;margin-bottom:14px;animation:fadeUp .3s ease}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    .card-title{font-size:10px;font-weight:700;letter-spacing:1.8px;color:var(--muted);text-transform:uppercase;margin-bottom:16px}
+
+    /* OTP Display */
+    .otp-display{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;text-align:center;position:relative;overflow:hidden}
+    .otp-display::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle,rgba(79,139,255,.07) 0%,transparent 60%);pointer-events:none}
+    .otp-number{font-family:var(--mono);font-size:50px;font-weight:500;letter-spacing:14px;color:var(--accent);text-shadow:0 0 32px rgba(79,139,255,.35);user-select:all}
+    .otp-label{font-size:11px;color:var(--muted);margin-top:6px}
+
+    /* Timer */
+    .timer-wrap{margin-top:12px}
+    .timer-bg{height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+    .timer-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width 1s linear,background .3s;border-radius:2px}
+    .timer-fill.danger{background:var(--red)}
+    .timer-txt{font-family:var(--mono);font-size:10px;color:var(--muted);text-align:right;margin-top:4px}
+
+    /* Fields */
+    .field{margin-bottom:13px}
+    .field label{display:block;font-size:10px;font-weight:700;letter-spacing:1.2px;color:var(--muted);text-transform:uppercase;margin-bottom:5px}
+    .field input,.field select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 13px;color:var(--text);font-family:var(--font);font-size:14px;outline:none;transition:border-color .2s,box-shadow .2s}
+    .field input:focus,.field select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,139,255,.1)}
+    .field input::placeholder{color:var(--muted)}
+    .field select option{background:var(--surface)}
+    .hint{font-size:10px;color:var(--muted);margin-top:4px;font-family:var(--mono)}
+
+    /* OTP digit input */
+    .otp-row{display:flex;gap:7px;justify-content:center}
+    .otp-digit{width:50px;height:58px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;color:var(--text);font-family:var(--mono);font-size:22px;text-align:center;outline:none;transition:border-color .2s,box-shadow .2s}
+    .otp-digit:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,139,255,.15)}
+    .otp-digit:disabled{opacity:.4}
+
+    /* Attempt dots */
+    .attempts-row{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px}
+    .adot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:background .25s}
+    .adot.used{background:var(--red)}
+    .adot-label{font-size:10px;color:var(--muted);font-family:var(--mono)}
+
+    /* Buttons */
+    .btn{width:100%;padding:13px;border-radius:12px;border:none;font-family:var(--font);font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;letter-spacing:.4px}
+    .btn:active{transform:scale(.98)}
+    .btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+    .btn-primary:hover{opacity:.92;box-shadow:0 4px 20px rgba(79,139,255,.3)}
+    .btn-primary:disabled{opacity:.4;cursor:not-allowed;transform:none}
+    .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+    .btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+    .btn-danger{background:rgba(239,68,68,.09);border:1px solid rgba(239,68,68,.25);color:var(--red)}
+    .btn-sm{width:auto;padding:7px 14px;font-size:12px;border-radius:9px}
+    .btn-cyan{background:rgba(6,182,212,.1);border:1px solid rgba(6,182,212,.25);color:var(--cyan)}
+
+    /* Badges */
+    .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.5px}
+    .badge.green{background:rgba(34,197,94,.12);color:var(--green)}
+    .badge.red{background:rgba(239,68,68,.12);color:var(--red)}
+    .badge.amber{background:rgba(245,158,11,.12);color:var(--amber)}
+    .badge.blue{background:rgba(79,139,255,.12);color:var(--accent)}
+    .badge.cyan{background:rgba(6,182,212,.1);color:var(--cyan)}
+    .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+    .dot.pulse{animation:pulse 1.5s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+    /* Alerts */
+    .alert{padding:11px 14px;border-radius:11px;font-size:13px;display:flex;align-items:flex-start;gap:9px;margin-bottom:13px}
+    .alert.success{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);color:var(--green)}
+    .alert.error{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);color:var(--red)}
+    .alert.info{background:rgba(79,139,255,.08);border:1px solid rgba(79,139,255,.2);color:var(--accent)}
+    .alert.warn{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:var(--amber)}
+    .alert-icon{font-size:15px;flex-shrink:0;margin-top:1px}
+
+    /* Stats */
+    .stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:14px}
+    .stat-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 10px;text-align:center}
+    .stat-value{font-size:22px;font-weight:800}
+    .stat-label{font-size:9px;color:var(--muted);margin-top:2px;letter-spacing:.6px;text-transform:uppercase}
+
+    /* Table */
+    .tbl{width:100%;border-collapse:collapse}
+    .tbl th{font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);padding:7px 9px;text-align:left;border-bottom:1px solid var(--border)}
+    .tbl td{padding:9px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}
+    .tbl tr:last-child td{border-bottom:none}
+    .tbl tr.flagged td{background:rgba(239,68,68,.03)}
+    .s-name{font-weight:600;font-size:13px}
+    .s-id{font-family:var(--mono);font-size:10px;color:var(--muted)}
+    .mono-sm{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+    /* GPS steps */
+    .gps-step{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:12px 15px;margin-bottom:8px;display:flex;align-items:center;gap:11px}
+    .gps-step.done .gps-step-label{color:var(--green)}
+    .gps-step.active .gps-step-label{color:var(--accent)}
+    .gps-step-icon{font-size:16px;flex-shrink:0;width:20px;text-align:center}
+    .gps-step-label{font-size:13px;font-weight:600;flex:1}
+    .gps-step-meta{font-size:10px;color:var(--muted);font-family:var(--mono)}
+
+    /* GPS status bar */
+    .gps-bar{display:flex;align-items:center;gap:8px;padding:9px 13px;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:13px;font-size:12px}
+    .gps-coords{font-family:var(--mono);font-size:10px;color:var(--muted)}
+
+    /* Session pill */
+    .session-pill{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
+    .session-info{font-size:13px;font-weight:700}
+    .session-meta{font-size:10px;color:var(--muted);font-family:var(--mono)}
+
+    /* User bar */
+    .user-bar{background:rgba(79,139,255,.05);border:1px solid rgba(79,139,255,.14);border-radius:10px;padding:9px 13px;display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+    .user-name{font-size:13px;font-weight:700}
+    .user-role{font-size:9px;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.8px}
+
+    /* Admin role badge row */
+    .role-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;font-family:var(--mono)}
+    .role-tag.admin{background:rgba(245,158,11,.1);color:var(--amber)}
+    .role-tag.teacher{background:rgba(79,139,255,.1);color:var(--accent)}
+    .role-tag.student{background:rgba(34,197,94,.1);color:var(--green)}
+
+    /* Audit log */
+    .audit-entry{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;align-items:flex-start;gap:10px}
+    .audit-entry:last-child{border-bottom:none}
+    .audit-type{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap}
+    .audit-type.login_success{background:rgba(34,197,94,.12);color:var(--green)}
+    .audit-type.login_fail{background:rgba(239,68,68,.12);color:var(--red)}
+    .audit-type.otp_fail{background:rgba(245,158,11,.12);color:var(--amber)}
+    .audit-type.attendance_flagged{background:rgba(239,68,68,.12);color:var(--red)}
+    .audit-type.session_start{background:rgba(79,139,255,.12);color:var(--accent)}
+    .audit-type.session_end{background:rgba(107,114,128,.12);color:var(--muted)}
+    .audit-type.logout{background:rgba(107,114,128,.12);color:var(--muted)}
+    .audit-type.register{background:rgba(6,182,212,.12);color:var(--cyan)}
+    .audit-type.token_refresh{background:rgba(124,58,237,.12);color:#a78bfa}
+    .audit-meta{font-size:11px;color:var(--muted);margin-top:2px;font-family:var(--mono)}
+    .audit-actor{font-size:12px;font-weight:600;flex:1}
+
+    /* Scroll containers */
+    .scroll-box{max-height:320px;overflow-y:auto}
+    .scroll-box::-webkit-scrollbar{width:3px}
+    .scroll-box::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+    /* Sub-tab bar (admin) */
+    .sub-tabs{display:flex;gap:6px;margin-bottom:16px;overflow-x:auto;padding-bottom:2px}
+    .sub-tab{flex-shrink:0;padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:var(--font);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s}
+    .sub-tab.active{background:rgba(79,139,255,.12);border-color:rgba(79,139,255,.3);color:var(--accent)}
+
+    /* Success */
+    .success-check{width:68px;height:68px;border-radius:50%;background:rgba(34,197,94,.1);border:2px solid rgba(34,197,94,.3);display:flex;align-items:center;justify-content:center;font-size:30px;margin:0 auto 14px;animation:popIn .4s cubic-bezier(.34,1.56,.64,1)}
+    @keyframes popIn{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+
+    /* Spinner */
+    .spinner{width:17px;height:17px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Misc */
+    .text-center{text-align:center}
+    .mt-8{margin-top:8px}.mt-12{margin-top:12px}.mt-16{margin-top:16px}
+    .row{display:flex;gap:9px}.row .btn{flex:1}
+    .flex-between{display:flex;align-items:center;justify-content:space-between}
+    .divider{height:1px;background:var(--border);margin:14px 0}
+    .empty-state{text-align:center;padding:30px;color:var(--muted);font-size:13px}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+const { useState, useEffect, useRef, useCallback } = React;
+const e = React.createElement;
+const API = "http://localhost:5000";
+
+// ── TOKEN STORAGE ──────────────────────────────────────────
+// Matches backend: POST /auth/login returns { "token": "...", "user": {...} }
+function getToken() { return localStorage.getItem("token"); }
+function setToken(t) { localStorage.setItem("token", t); }
+function getUser()  { try { return JSON.parse(localStorage.getItem("sas_user")||"null"); } catch { return null; } }
+function setUser(u) { localStorage.setItem("sas_user", JSON.stringify(u)); }
+function clearAuth() { localStorage.removeItem("token"); localStorage.removeItem("sas_user"); }
+
+// ── API CLIENT ─────────────────────────────────────────────
+// Always sends Authorization: Bearer <token> when token exists
+async function api(method, path, body) {
+  const headers = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = "Bearer " + token;
+
+  const res = await fetch(API + path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+  return data;
+}
+
+// ── DEVICE ID ──────────────────────────────────────────────
+function getDeviceId() {
+  let id = localStorage.getItem("sas_dev");
+  if (!id) {
+    const raw = [navigator.userAgent, screen.width, screen.height,
+                 navigator.language, new Date().getTimezoneOffset()].join("|");
+    let h = 0;
+    for (let i = 0; i < raw.length; i++) { h = (h << 5) - h + raw.charCodeAt(i); h |= 0; }
+    id = "dev_" + Math.abs(h).toString(36) + "_" + Date.now().toString(36);
+    localStorage.setItem("sas_dev", id);
+  }
+  return id;
+}
+
+// ── SHARED COMPONENTS ──────────────────────────────────────
+function Alert({ type, icon, msg }) {
+  if (!msg) return null;
+  return e("div", { className: "alert " + type },
+    e("span", { className: "alert-icon" }, icon),
+    e("span", null, msg)
+  );
+}
+
+function Spinner() { return e("span", { className: "spinner" }); }
+
+function OTPTimer({ startTime, duration, onExpire }) {
+  const [rem, setRem] = useState(duration || 60);
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const left = Math.max(0, Math.round((duration || 60) - (Date.now() - startTime) / 1000));
+      setRem(left);
+      if (left === 0) { clearInterval(iv); if (onExpire) onExpire(); }
+    }, 500);
+    return () => clearInterval(iv);
+  }, [startTime, duration]);
+  const pct = (rem / (duration || 60)) * 100;
+  return e("div", { className: "timer-wrap" },
+    e("div", { className: "timer-bg" },
+      e("div", { className: "timer-fill" + (rem <= 15 ? " danger" : ""), style: { width: pct + "%" } })
+    ),
+    e("div", { className: "timer-txt" }, rem + "s remaining")
+  );
+}
+
+function OTPDigitInput({ onComplete, disabled }) {
+  const [digits, setDigits] = useState(["", "", "", "", "", ""]);
+  const refs = useRef([]);
+  const handle = (i, val) => {
+    if (!/^\d?$/.test(val)) return;
+    const next = [...digits]; next[i] = val; setDigits(next);
+    if (val && i < 5) refs.current[i + 1]?.focus();
+    if (next.every(d => d)) onComplete(next.join(""));
+  };
+  const onKey = (i, ev) => { if (ev.key === "Backspace" && !digits[i] && i > 0) refs.current[i - 1]?.focus(); };
+  const onPaste = ev => {
+    const p = ev.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (p.length === 6) { setDigits(p.split("")); onComplete(p); }
+  };
+  return e("div", { className: "otp-row" },
+    digits.map((d, i) => e("input", {
+      key: i, ref: el => refs.current[i] = el,
+      className: "otp-digit", type: "text", inputMode: "numeric",
+      maxLength: 1, value: d, disabled,
+      onChange: ev => handle(i, ev.target.value),
+      onKeyDown: ev => onKey(i, ev),
+      onPaste: i === 0 ? onPaste : undefined,
+    }))
+  );
+}
+
+function AttemptDots({ used, max }) {
+  max = max || 3;
+  return e("div", { className: "attempts-row" },
+    Array.from({ length: max }, (_, i) => e("div", { key: i, className: "adot" + (i < used ? " used" : "") })),
+    e("span", { className: "adot-label" }, (max - used) + " attempt" + (max - used === 1 ? "" : "s") + " left")
+  );
+}
+
+function GPSProgress({ step, samples }) {
+  const steps = ["Sample 1 — initial reading", "Sample 2 — 2s later", "Sample 3 — consistency check"];
+  return e("div", null,
+    e("div", { style: { fontSize: 11, color: "var(--muted)", marginBottom: 10, fontFamily: "var(--mono)" } },
+      "Collecting 3 GPS samples to detect mock location apps…"
+    ),
+    steps.map((label, i) => {
+      const done = samples.length > i;
+      const active = step === i && !done;
+      return e("div", { key: i, className: "gps-step" + (done ? " done" : active ? " active" : "") },
+        e("span", { className: "gps-step-icon" }, done ? "✓" : active ? "⟳" : "○"),
+        e("span", { className: "gps-step-label" }, label),
+        done ? e("span", { className: "gps-step-meta" },
+          samples[i]?.accuracy ? "±" + Math.round(samples[i].accuracy) + "m" : "ok"
+        ) : null
+      );
+    })
+  );
+}
+
+// ── LOGIN PAGE ─────────────────────────────────────────────
+function LoginPage({ onLogin }) {
+  const [userId, setUserId]     = useState("teacher_001");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState("");
+
+  const submit = async () => {
+    if (!userId || !password) { setErr("Fill all fields."); return; }
+    setLoading(true); setErr("");
+    try {
+      // POST /auth/login → { token, user }
+      const data = await api("POST", "/auth/login", { user_id: userId, password });
+      setToken(data.token);   // store as "token" — matches getToken()
+      setUser(data.user);
+      onLogin(data.user);
+    } catch (ex) { setErr(ex.message); }
+    setLoading(false);
+  };
+
+  return e("div", { className: "card" },
+    e("div", { className: "text-center", style: { marginBottom: 20 } },
+      e("div", { style: { fontSize: 36, marginBottom: 10 } }, "🔐"),
+      e("div", { style: { fontSize: 20, fontWeight: 800 } }, "Teacher Login"),
+      e("div", { style: { fontSize: 12, color: "var(--muted)", marginTop: 4 } }, "JWT secured — 1 hour token")
+    ),
+    e("div", { className: "field" },
+      e("label", null, "Teacher ID"),
+      e("input", { placeholder: "teacher_001", value: userId, onChange: ev => setUserId(ev.target.value) })
+    ),
+    e("div", { className: "field" },
+      e("label", null, "Password"),
+      e("input", {
+        type: "password", placeholder: "Password", value: password,
+        onChange: ev => setPassword(ev.target.value),
+        onKeyDown: ev => { if (ev.key === "Enter") submit(); }
+      }),
+      e("div", { className: "hint" }, "Default: teacher123")
+    ),
+    Alert({ type: "error", icon: "✕", msg: err }),
+    e("button", { className: "btn btn-primary", onClick: submit, disabled: loading },
+      loading ? Spinner() : "Sign In →"
+    )
+  );
+}
+
+// ── STUDENT PAGE ───────────────────────────────────────────
+function StudentPage() {
+  const [step, setStep]     = useState("form"); // form | gps | otp | success
+  const [form, setForm]     = useState({ studentId: "", studentName: "", sessionId: "", wifiSsid: "" });
+  const [gps, setGps]       = useState(null);
+  const [samples, setSmp]   = useState([]);
+  const [gpsStep, setGS]    = useState(0);
+  const [attempts, setAtt]  = useState(0);
+  const [err, setErr]       = useState("");
+  const [loading, setL]     = useState(false);
+  const [result, setRes]    = useState(null);
+  const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const startGPS = async () => {
+    if (!form.studentId || !form.studentName || !form.sessionId) { setErr("Fill all fields."); return; }
+    setErr(""); setStep("gps"); setSmp([]); setGS(0);
+    try {
+      const collected = [];
+      for (let i = 0; i < 3; i++) {
+        setGS(i);
+        const pos = await new Promise((res, rej) =>
+          navigator.geolocation.getCurrentPosition(
+            p => res({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy }),
+            er => rej(["Location permission denied", "GPS unavailable", "GPS timed out"][er.code - 1] || "GPS error"),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+          )
+        );
+        collected.push(pos);
+        setSmp([...collected]);
+        if (i < 2) await new Promise(r => setTimeout(r, 2000));
+      }
+      const last = collected[collected.length - 1];
+      setGps({ ...last, samples: collected });
+      setStep("otp");
+    } catch (ex) { setErr(String(ex)); setStep("form"); }
+  };
+
+  const submit = async (otpVal) => {
+    setL(true); setErr("");
+    try {
+      // POST /attendance/mark — no auth required (student route)
+      const data = await api("POST", "/attendance/mark", {
+        session_id:  parseInt(form.sessionId),
+        otp:         otpVal,
+        lat:         gps.lat,
+        lon:         gps.lon,
+        accuracy:    gps.accuracy,
+        gps_samples: gps.samples || [],
+        student_id:  form.studentId,
+        student_name: form.studentName,
+        device_id:   getDeviceId(),
+        wifi_ssid:   form.wifiSsid || null,
+      });
+      setRes(data); setStep("success");
+    } catch (ex) { setErr(ex.message); setAtt(a => a + 1); }
+    setL(false);
+  };
+
+  if (step === "success") return e("div", null,
+    e("div", { className: "card text-center" },
+      e("div", { className: "success-check" }, "✓"),
+      e("div", { style: { fontSize: 20, fontWeight: 800 } }, "Attendance Marked!"),
+      e("div", { style: { color: "var(--muted)", fontSize: 13, marginTop: 6 } },
+        result?.student_name + " · " + (result?.distance_m || 0).toFixed(1) + "m from classroom"
+      ),
+      result?.flagged && e("div", { className: "mt-12" },
+        e("span", { className: "badge amber" }, e("span", { className: "dot" }), " Flagged for review")
+      ),
+      e("button", {
+        className: "btn btn-outline mt-16",
+        onClick: () => { setStep("form"); setGps(null); setSmp([]); setAtt(0); setErr(""); }
+      }, "Mark Another")
+    )
+  );
+
+  if (step === "gps") return e("div", null,
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "Verifying Your Location"),
+      e(GPSProgress, { step: gpsStep, samples }),
+      e("button", { className: "btn btn-outline mt-12", onClick: () => setStep("form") }, "← Cancel")
+    )
+  );
+
+  if (step === "otp") return e("div", null,
+    gps && e("div", { className: "gps-bar" },
+      e("span", null, "📍"),
+      e("div", null,
+        e("div", { style: { fontWeight: 700, fontSize: 12 } }, "3-Sample GPS Verified"),
+        e("div", { className: "gps-coords" },
+          gps.lat.toFixed(5) + ", " + gps.lon.toFixed(5) + " · ±" + Math.round(gps.accuracy || 0) + "m"
+        )
+      ),
+      e("span", { className: "badge green", style: { marginLeft: "auto" } },
+        e("span", { className: "dot" }), " Live"
+      )
+    ),
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "Enter OTP"),
+      e("div", { style: { fontSize: 13, color: "var(--muted)", marginBottom: 18 } },
+        "Enter the 6-digit code from the board. 3 attempts allowed."
+      ),
+      e(OTPDigitInput, { onComplete: submit, disabled: loading }),
+      attempts > 0 && e(AttemptDots, { used: attempts, max: 3 }),
+      Alert({ type: "error", icon: "✕", msg: err }),
+      loading && e("div", { style: { textAlign: "center", marginTop: 14 } }, Spinner()),
+      e("button", { className: "btn btn-outline mt-12", onClick: () => setStep("form") }, "← Back")
+    )
+  );
+
+  // form step
+  return e("div", null,
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "Your Details"),
+      e("div", { className: "field" },
+        e("label", null, "Session ID"),
+        e("input", { type: "number", placeholder: "Session ID from teacher",
+          value: form.sessionId, onChange: ev => sf("sessionId", ev.target.value) })
+      ),
+      e("div", { className: "field" },
+        e("label", null, "Student ID"),
+        e("input", { placeholder: "e.g. 2023CS042",
+          value: form.studentId, onChange: ev => sf("studentId", ev.target.value) })
+      ),
+      e("div", { className: "field" },
+        e("label", null, "Full Name"),
+        e("input", { placeholder: "Your full name",
+          value: form.studentName, onChange: ev => sf("studentName", ev.target.value) })
+      ),
+      e("div", { className: "field" },
+        e("label", null, "Campus WiFi SSID (optional)"),
+        e("input", { placeholder: "e.g. CampusWiFi",
+          value: form.wifiSsid, onChange: ev => sf("wifiSsid", ev.target.value) }),
+        e("div", { className: "hint" }, "Helps reduce fraud flags")
+      ),
+      Alert({ type: "error", icon: "✕", msg: err }),
+      Alert({ type: "info", icon: "🛡", msg: "GPS sampled 3× to detect mock location apps." }),
+      e("button", { className: "btn btn-primary", onClick: startGPS }, "Verify Location & Continue →")
+    )
+  );
+}
+
+// ── TEACHER PAGE ───────────────────────────────────────────
+function TeacherPage({ user, onLogout }) {
+  const [view, setView]    = useState("start");   // start | session
+  const [session, setSess] = useState(null);
+  const [otpTime, setOT]   = useState(null);
+  const [records, setRec]  = useState([]);
+  const [loading, setL]    = useState(false);
+  const [err, setErr]      = useState("");
+  const [form, setForm]    = useState({ subject: "Computer Networks", lat: "28.7041", lon: "77.1025", radius: "100" });
+  const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const fetchRec = useCallback(async () => {
+    if (!session) return;
+    try {
+      // GET /attendance/list/:id
+      const d = await api("GET", "/attendance/list/" + session.session_id);
+      setRec(d.records || []);
+    } catch (ex) { console.error("fetchRec:", ex.message); }
+  }, [session]);
+
+  useEffect(() => {
+    if (view !== "session") return;
+    fetchRec();
+    const iv = setInterval(fetchRec, 5000);
+    return () => clearInterval(iv);
+  }, [view, fetchRec]);
+
+  const startSession = async () => {
+    setL(true); setErr("");
+    try {
+      // POST /session/start — Authorization header sent automatically via api()
+      const d = await api("POST", "/session/start", {
+        subject: form.subject,
+        lat:     parseFloat(form.lat),
+        lon:     parseFloat(form.lon),
+        radius:  parseInt(form.radius),
+      });
+      setSess(d); setOT(Date.now()); setView("session");
+    } catch (ex) { setErr(ex.message); }
+    setL(false);
+  };
+
+  const refreshOTP = async () => {
+    try {
+      // POST /session/refresh-otp/:id
+      const d = await api("POST", "/session/refresh-otp/" + session.session_id);
+      setSess(s => ({ ...s, otp: d.otp })); setOT(Date.now());
+    } catch (ex) { setErr(ex.message); }
+  };
+
+  const endSession = async () => {
+    try { await api("POST", "/session/end/" + session.session_id); } catch {}
+    setView("start"); setSess(null); setRec([]);
+  };
+
+  const doLogout = async () => {
+    try { await api("POST", "/auth/logout"); } catch {}
+    clearAuth(); onLogout();
+  };
+
+  const total   = records.length;
+  const flagged = records.filter(r => r.is_flagged).length;
+
+  // ── SESSION ACTIVE VIEW ──
+  if (view === "session" && session) return e("div", null,
+    e("div", { className: "user-bar" },
+      e("div", null,
+        e("div", { className: "user-name" }, "👩‍🏫 " + user.name),
+        e("div", { className: "user-role" }, "Teacher · JWT Authenticated")
+      ),
+      e("button", { className: "btn btn-outline btn-sm", onClick: doLogout }, "Logout")
+    ),
+    e("div", { className: "session-pill" },
+      e("div", null,
+        e("div", { className: "session-info" }, session.subject),
+        e("div", { className: "session-meta" }, "Session #" + session.session_id + " · " + session.geofence_radius + "m radius")
+      ),
+      e("span", { className: "badge green" }, e("span", { className: "dot pulse" }), " Live")
+    ),
+    e("div", { className: "card" },
+      e("div", { className: "flex-between", style: { marginBottom: 4 } },
+        e("div", { className: "card-title", style: { marginBottom: 0 } }, "Current OTP"),
+        e("button", { className: "btn btn-outline btn-sm", onClick: refreshOTP }, "↻ Refresh")
+      ),
+      e("div", { className: "otp-display" },
+        e("div", { className: "otp-number" }, session.otp),
+        e("div", { className: "otp-label" }, "Show this to students")
+      ),
+      otpTime && e(OTPTimer, { startTime: otpTime, duration: 60, onExpire: refreshOTP })
+    ),
+    e("div", { className: "stats-row" },
+      e("div", { className: "stat-box" },
+        e("div", { className: "stat-value", style: { color: "var(--accent)" } }, total),
+        e("div", { className: "stat-label" }, "Total")
+      ),
+      e("div", { className: "stat-box" },
+        e("div", { className: "stat-value", style: { color: "var(--green)" } }, total - flagged),
+        e("div", { className: "stat-label" }, "Clean")
+      ),
+      e("div", { className: "stat-box" },
+        e("div", { className: "stat-value", style: { color: "var(--red)" } }, flagged),
+        e("div", { className: "stat-label" }, "Flagged")
+      )
+    ),
+    records.length > 0 && e("div", { className: "card" },
+      e("div", { className: "flex-between", style: { marginBottom: 12 } },
+        e("div", { className: "card-title", style: { marginBottom: 0 } }, "Live Attendance"),
+        e("button", { className: "btn btn-outline btn-sm", onClick: fetchRec }, "↻")
+      ),
+      e("div", { className: "scroll-box" },
+        e("table", { className: "tbl" },
+          e("thead", null, e("tr", null,
+            e("th", null, "Student"), e("th", null, "Dist"), e("th", null, "Status")
+          )),
+          e("tbody", null,
+            records.map((r, i) => e("tr", { key: i, className: r.is_flagged ? "flagged" : "" },
+              e("td", null,
+                e("div", { className: "s-name" }, r.student_name),
+                e("div", { className: "s-id" }, r.student_id)
+              ),
+              e("td", null, e("span", { className: "mono-sm" }, (r.distance || 0).toFixed(0) + "m")),
+              e("td", null, r.is_flagged
+                ? e("span", { className: "badge red", title: r.flag_reason }, "⚠ " + (r.flag_reason || "").split(",")[0])
+                : e("span", { className: "badge green" }, "✓ OK")
+              )
+            ))
+          )
+        )
+      )
+    ),
+    Alert({ type: "error", icon: "✕", msg: err }),
+    e("button", { className: "btn btn-danger mt-12", onClick: endSession }, "End Session")
+  );
+
+  // ── START SESSION VIEW ──
+  return e("div", null,
+    e("div", { className: "user-bar" },
+      e("div", null,
+        e("div", { className: "user-name" }, "👩‍🏫 " + user.name),
+        e("div", { className: "user-role" }, "Teacher · JWT Authenticated")
+      ),
+      e("button", { className: "btn btn-outline btn-sm", onClick: doLogout }, "Logout")
+    ),
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "New Session"),
+      e("div", { className: "field" },
+        e("label", null, "Subject"),
+        e("select", { value: form.subject, onChange: ev => sf("subject", ev.target.value) },
+          ["Computer Networks", "Data Structures", "Operating Systems", "DBMS",
+           "Software Engineering", "Machine Learning", "Web Technologies", "Computer Architecture"]
+          .map(s => e("option", { key: s, value: s }, s))
+        )
+      ),
+      e("div", { className: "row" },
+        e("div", { className: "field", style: { flex: 1 } },
+          e("label", null, "Latitude"),
+          e("input", { type: "number", step: "0.0001", value: form.lat, onChange: ev => sf("lat", ev.target.value) })
+        ),
+        e("div", { className: "field", style: { flex: 1 } },
+          e("label", null, "Longitude"),
+          e("input", { type: "number", step: "0.0001", value: form.lon, onChange: ev => sf("lon", ev.target.value) })
+        )
+      ),
+      e("div", { className: "field" },
+        e("label", null, "Geofence Radius (m)"),
+        e("input", { type: "number", value: form.radius, onChange: ev => sf("radius", ev.target.value) })
+      ),
+      Alert({ type: "error", icon: "✕", msg: err }),
+      e("button", { className: "btn btn-primary", onClick: startSession, disabled: loading },
+        loading ? Spinner() : "🚀 Start Session"
+      )
+    )
+  );
+}
+
+// ── APP ROOT ───────────────────────────────────────────────
+function App() {
+  const [tab, setTab]   = useState("student");
+  const [user, setUser] = useState(getUser);
+
+  const handleLogin  = u => setUser(u);
+  const handleLogout = () => setUser(null);
+
+  return e("div", { className: "app" },
+    e("div", { className: "header" },
+      e("div", { className: "logo" },
+        e("div", { className: "logo-icon" }, "📡"),
+        e("div", null,
+          e("div", { className: "logo-text" }, "SmartAttend"),
+          e("div", { className: "logo-sub" }, "v2 · SECURE")
+        )
+      ),
+      e("span", { className: "badge blue" }, "v2.0")
+    ),
+    e("div", { className: "security-bar" },
+      ["SHA-256 OTP", "JWT Auth", "Rate Limit", "3-Sample GPS", "Anomaly Detect"]
+      .map(c => e("span", { key: c, className: "sec-chip" }, c))
+    ),
+    e("div", { className: "tab-bar" },
+      e("button", { className: "tab" + (tab === "student" ? " active" : ""), onClick: () => setTab("student") }, "👨‍🎓 Student"),
+      e("button", { className: "tab" + (tab === "teacher" ? " active" : ""), onClick: () => setTab("teacher") }, "👩‍🏫 Teacher")
+    ),
+    tab === "student" && e(StudentPage),
+    tab === "teacher" && (
+      user
+        ? e(TeacherPage, { user, onLogout: handleLogout })
+        : e(LoginPage,   { onLogin: handleLogin })
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(e(App));
+
+</script>
+</body>
+</html>
