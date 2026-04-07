@@ -18,6 +18,10 @@ node_modules/
 frontend/build/
 .npm/
 
+# logs
+project_dump.txt.xz
+project_dump.txt
+
 # OS
 .DS_Store
 Thumbs.db
