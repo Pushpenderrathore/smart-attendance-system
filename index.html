@@ -204,33 +204,18 @@ const API = "http://localhost:5000";
 
 // ── AUTH STORE ──────────────────────────────────────────────
 const Auth = {
-  get:        ()  => localStorage.getItem("sas_tok"),
-  set:        (t) => localStorage.setItem("sas_tok", t),
-  getRefresh: ()  => localStorage.getItem("sas_ref"),
-  setRefresh: (t) => localStorage.setItem("sas_ref", t),
-  getUser:    ()  => { try { return JSON.parse(localStorage.getItem("sas_usr")||"null"); } catch { return null; } },
-  setUser:    (u) => localStorage.setItem("sas_usr", JSON.stringify(u)),
-  clear:      ()  => ["sas_tok","sas_ref","sas_usr"].forEach(k => localStorage.removeItem(k)),
+  get:     ()  => localStorage.getItem("sas_tok"),
+  set:     (t) => localStorage.setItem("sas_tok", t),
+  getUser: ()  => { try { return JSON.parse(localStorage.getItem("sas_usr")||"null"); } catch { return null; } },
+  setUser: (u) => localStorage.setItem("sas_usr", JSON.stringify(u)),
+  clear:   ()  => ["sas_tok","sas_usr"].forEach(k => localStorage.removeItem(k)),
 };
 
-// ── API CLIENT with auto-refresh ────────────────────────────
+// ── API CLIENT ──────────────────────────────────────────────
 async function api(method, path, body, auth=false) {
   const hdrs = { "Content-Type": "application/json" };
   if (auth && Auth.get()) hdrs["Authorization"] = "Bearer " + Auth.get();
-  let res = await fetch(API + path, { method, headers: hdrs, body: body ? JSON.stringify(body) : undefined });
-  // Auto-refresh on 401
-  if (res.status === 401 && auth && Auth.getRefresh()) {
-    const rr = await fetch(API + "/auth/refresh", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: Auth.getRefresh() }),
-    });
-    if (rr.ok) {
-      const rd = await rr.json();
-      Auth.set(rd.access_token); Auth.setRefresh(rd.refresh_token);
-      hdrs["Authorization"] = "Bearer " + rd.access_token;
-      res = await fetch(API + path, { method, headers: hdrs, body: body ? JSON.stringify(body) : undefined });
-    }
-  }
+  const res = await fetch(API + path, { method, headers: hdrs, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
@@ -355,8 +340,7 @@ function LoginPage({ onLogin }) {
     setL(true); setErr("");
     try {
       const data = await api("POST", "/auth/login", { user_id:form.userId, password:form.password });
-      Auth.set(data.access_token);
-      Auth.setRefresh(data.refresh_token);
+      Auth.set(data.token);
       Auth.setUser(data.user);
       onLogin(data.user);
     } catch(ex) { setErr(ex.message); }
@@ -570,7 +554,7 @@ function TeacherPage({ user, onLogout }) {
   };
 
   const doLogout = async () => {
-    try { await api("POST","/auth/logout",{refresh_token:Auth.getRefresh()},true); } catch{}
+    try { await api("POST","/auth/logout",null,true); } catch{}
     Auth.clear(); onLogout();
   };
 
@@ -726,7 +710,7 @@ function AdminPage({ user, onLogout }) {
   };
 
   const doLogout = async () => {
-    try { await api("POST","/auth/logout",{refresh_token:Auth.getRefresh()},true); } catch{}
+    try { await api("POST","/auth/logout",null,true); } catch{}
     Auth.clear(); onLogout();
   };
 

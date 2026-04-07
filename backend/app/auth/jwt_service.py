@@ -2,7 +2,7 @@
 JWT Authentication Service
 ──────────────────────────
 ✅ PBKDF2-SHA256 password hashing (stdlib only, no extra deps)
-✅ Signed JWT-style tokens (1hr expiry, or custom expiry for refresh)
+✅ Signed JWT-style tokens (1hr expiry)
 ✅ Role-based access: 'teacher' | 'student'
 ✅ Token blacklist for logout
 """
@@ -39,17 +39,11 @@ _users: dict = {
 }
 
 
-def generate_token(user_id: str, role: str, expiry: int = None) -> str:
-    """
-    Generate a signed JWT.
-    expiry: seconds from now. Defaults to TOKEN_EXPIRY (1 hour).
-    Pass expiry=7*24*3600 for refresh tokens.
-    """
-    exp_seconds = expiry if expiry is not None else TOKEN_EXPIRY
+def generate_token(user_id: str, role: str) -> str:
     header  = _b64e(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
     payload = _b64e(json.dumps({
         "sub": user_id, "role": role,
-        "iat": int(time.time()), "exp": int(time.time()) + exp_seconds,
+        "iat": int(time.time()), "exp": int(time.time()) + TOKEN_EXPIRY,
         "jti": secrets.token_hex(8),
     }).encode())
     sig = _b64e(_sign(f"{header}.{payload}").encode())

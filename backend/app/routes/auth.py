@@ -1,14 +1,13 @@
 """
 Auth Routes
 ───────────
-POST /auth/login    → access_token + refresh_token
-POST /auth/refresh  → new access_token (using refresh_token)
+POST /auth/login    → { token, user }
 POST /auth/logout   → blacklists token
 POST /auth/register → register new teacher
 GET  /auth/me       → current user info
 """
 from flask import Blueprint, request, jsonify, g
-from auth.jwt_service import login, logout, register_teacher, verify_token, generate_token
+from auth.jwt_service import login, logout, register_teacher
 from middleware.auth_middleware import require_auth
 from middleware.rate_limiter import rate_limit
 
@@ -29,47 +28,11 @@ def do_login():
     if not token:
         return jsonify({"error": result}), 401
 
-    # Generate refresh token (7-day expiry) alongside the access token
-    refresh = generate_token(result["id"], result["role"], expiry=7 * 24 * 3600)
-
     return jsonify({
-        "success":            True,
-        "user":               result,
-        "access_token":       token,
-        "refresh_token":      refresh,
-        "token_type":         "Bearer",
-        "expires_in":         3600,
-        "refresh_expires_in": 7 * 24 * 3600,
-    })
-
-
-@auth_bp.route("/refresh", methods=["POST"])
-@rate_limit(max_requests=10, window_seconds=60)
-def do_refresh():
-    """Exchange a valid refresh token for a new access + refresh pair."""
-    data          = request.json or {}
-    refresh_token = data.get("refresh_token", "")
-
-    if not refresh_token:
-        return jsonify({"error": "refresh_token is required."}), 400
-
-    payload, err = verify_token(refresh_token)
-    if err:
-        return jsonify({"error": f"Invalid refresh token: {err}"}), 401
-
-    # Issue new access token
-    new_access = generate_token(payload["sub"], payload["role"], expiry=3600)
-    # Rotate: blacklist old refresh token, issue new one
-    logout(refresh_token)
-    new_refresh = generate_token(payload["sub"], payload["role"], expiry=7 * 24 * 3600)
-
-    return jsonify({
-        "success":            True,
-        "access_token":       new_access,
-        "refresh_token":      new_refresh,
-        "token_type":         "Bearer",
-        "expires_in":         3600,
-        "refresh_expires_in": 7 * 24 * 3600,
+        "success":    True,
+        "token":      token,
+        "user":       result,
+        "expires_in": 3600,
     })
 
 
@@ -107,4 +70,3 @@ def do_register():
 @require_auth()
 def me():
     return jsonify({"user": g.user})
-    
