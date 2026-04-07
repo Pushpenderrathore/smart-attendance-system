@@ -202,22 +202,28 @@ const { useState, useEffect, useRef, useCallback } = React;
 const e = React.createElement;
 const API = "http://localhost:5000";
 
-// ── AUTH STORE ──────────────────────────────────────────────
-const Auth = {
-  get:     ()  => localStorage.getItem("sas_tok"),
-  set:     (t) => localStorage.setItem("sas_tok", t),
-  getUser: ()  => { try { return JSON.parse(localStorage.getItem("sas_usr")||"null"); } catch { return null; } },
-  setUser: (u) => localStorage.setItem("sas_usr", JSON.stringify(u)),
-  clear:   ()  => ["sas_tok","sas_usr"].forEach(k => localStorage.removeItem(k)),
-};
+// ── TOKEN STORAGE ──────────────────────────────────────────
+// Matches backend: POST /auth/login returns { "token": "...", "user": {...} }
+function getToken() { return localStorage.getItem("token"); }
+function setToken(t) { localStorage.setItem("token", t); }
+function getUser()  { try { return JSON.parse(localStorage.getItem("sas_user")||"null"); } catch { return null; } }
+function setUser(u) { localStorage.setItem("sas_user", JSON.stringify(u)); }
+function clearAuth() { localStorage.removeItem("token"); localStorage.removeItem("sas_user"); }
 
-// ── API CLIENT ──────────────────────────────────────────────
-async function api(method, path, body, auth=false) {
-  const hdrs = { "Content-Type": "application/json" };
-  if (auth && Auth.get()) hdrs["Authorization"] = "Bearer " + Auth.get();
-  const res = await fetch(API + path, { method, headers: hdrs, body: body ? JSON.stringify(body) : undefined });
+// ── API CLIENT ─────────────────────────────────────────────
+// Always sends Authorization: Bearer <token> when token exists
+async function api(method, path, body) {
+  const headers = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers["Authorization"] = "Bearer " + token;
+
+  const res = await fetch(API + path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
   return data;
 }
 
@@ -225,30 +231,20 @@ async function api(method, path, body, auth=false) {
 function getDeviceId() {
   let id = localStorage.getItem("sas_dev");
   if (!id) {
-    const raw = [navigator.userAgent, screen.width, screen.height, navigator.language,
-                 navigator.hardwareConcurrency||0, new Date().getTimezoneOffset()].join("|");
+    const raw = [navigator.userAgent, screen.width, screen.height,
+                 navigator.language, new Date().getTimezoneOffset()].join("|");
     let h = 0;
-    for (let i=0;i<raw.length;i++){h=(h<<5)-h+raw.charCodeAt(i);h|=0;}
+    for (let i = 0; i < raw.length; i++) { h = (h << 5) - h + raw.charCodeAt(i); h |= 0; }
     id = "dev_" + Math.abs(h).toString(36) + "_" + Date.now().toString(36);
     localStorage.setItem("sas_dev", id);
   }
   return id;
 }
 
-// ── HELPERS ────────────────────────────────────────────────
-function fmtTime(ts) {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
-}
-function fmtDate(ts) {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleDateString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
-}
-
 // ── SHARED COMPONENTS ──────────────────────────────────────
 function Alert({ type, icon, msg }) {
   if (!msg) return null;
-  return e("div", { className: `alert ${type}` },
+  return e("div", { className: "alert " + type },
     e("span", { className: "alert-icon" }, icon),
     e("span", null, msg)
   );
@@ -256,119 +252,120 @@ function Alert({ type, icon, msg }) {
 
 function Spinner() { return e("span", { className: "spinner" }); }
 
-function OTPTimer({ startTime, duration=60, onExpire }) {
-  const [rem, setRem] = useState(duration);
+function OTPTimer({ startTime, duration, onExpire }) {
+  const [rem, setRem] = useState(duration || 60);
   useEffect(() => {
     const iv = setInterval(() => {
-      const left = Math.max(0, Math.round(duration - (Date.now()-startTime)/1000));
+      const left = Math.max(0, Math.round((duration || 60) - (Date.now() - startTime) / 1000));
       setRem(left);
-      if (left===0) { clearInterval(iv); onExpire&&onExpire(); }
+      if (left === 0) { clearInterval(iv); if (onExpire) onExpire(); }
     }, 500);
     return () => clearInterval(iv);
   }, [startTime, duration]);
-  const pct = (rem/duration)*100;
+  const pct = (rem / (duration || 60)) * 100;
   return e("div", { className: "timer-wrap" },
-    e("div", { className: "timer-bg" }, e("div", { className:`timer-fill${rem<=15?" danger":""}`, style:{width:pct+"%"} })),
+    e("div", { className: "timer-bg" },
+      e("div", { className: "timer-fill" + (rem <= 15 ? " danger" : ""), style: { width: pct + "%" } })
+    ),
     e("div", { className: "timer-txt" }, rem + "s remaining")
   );
 }
 
 function OTPDigitInput({ onComplete, disabled }) {
-  const [digits, setDigits] = useState(["","","","","",""]);
+  const [digits, setDigits] = useState(["", "", "", "", "", ""]);
   const refs = useRef([]);
   const handle = (i, val) => {
     if (!/^\d?$/.test(val)) return;
-    const next=[...digits]; next[i]=val; setDigits(next);
-    if (val && i<5) refs.current[i+1]?.focus();
-    if (next.every(d=>d)) onComplete(next.join(""));
+    const next = [...digits]; next[i] = val; setDigits(next);
+    if (val && i < 5) refs.current[i + 1]?.focus();
+    if (next.every(d => d)) onComplete(next.join(""));
   };
-  const onKey = (i, ev) => { if (ev.key==="Backspace"&&!digits[i]&&i>0) refs.current[i-1]?.focus(); };
+  const onKey = (i, ev) => { if (ev.key === "Backspace" && !digits[i] && i > 0) refs.current[i - 1]?.focus(); };
   const onPaste = ev => {
-    const p=ev.clipboardData.getData("text").replace(/\D/g,"").slice(0,6);
-    if(p.length===6){setDigits(p.split(""));onComplete(p);}
+    const p = ev.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (p.length === 6) { setDigits(p.split("")); onComplete(p); }
   };
-  return e("div", { className:"otp-row" },
-    digits.map((d,i) => e("input", {
-      key:i, ref:el=>refs.current[i]=el, className:"otp-digit",
-      type:"text", inputMode:"numeric", maxLength:1, value:d, disabled,
-      onChange:ev=>handle(i,ev.target.value), onKeyDown:ev=>onKey(i,ev),
-      onPaste:i===0?onPaste:undefined,
+  return e("div", { className: "otp-row" },
+    digits.map((d, i) => e("input", {
+      key: i, ref: el => refs.current[i] = el,
+      className: "otp-digit", type: "text", inputMode: "numeric",
+      maxLength: 1, value: d, disabled,
+      onChange: ev => handle(i, ev.target.value),
+      onKeyDown: ev => onKey(i, ev),
+      onPaste: i === 0 ? onPaste : undefined,
     }))
   );
 }
 
-function AttemptDots({ used, max=3 }) {
-  return e("div", { className:"attempts-row" },
-    Array.from({length:max},(_,i) => e("div",{key:i,className:`adot${i<used?" used":""}`})),
-    e("span",{className:"adot-label"},`${max-used} attempt${max-used===1?"":"s"} left`)
+function AttemptDots({ used, max }) {
+  max = max || 3;
+  return e("div", { className: "attempts-row" },
+    Array.from({ length: max }, (_, i) => e("div", { key: i, className: "adot" + (i < used ? " used" : "") })),
+    e("span", { className: "adot-label" }, (max - used) + " attempt" + (max - used === 1 ? "" : "s") + " left")
   );
 }
 
 function GPSProgress({ step, samples }) {
-  const steps = ["Sample 1 — initial reading","Sample 2 — 2s later","Sample 3 — consistency check"];
+  const steps = ["Sample 1 — initial reading", "Sample 2 — 2s later", "Sample 3 — consistency check"];
   return e("div", null,
-    e("div",{style:{fontSize:11,color:"var(--muted)",marginBottom:10,fontFamily:"var(--mono)"}},
+    e("div", { style: { fontSize: 11, color: "var(--muted)", marginBottom: 10, fontFamily: "var(--mono)" } },
       "Collecting 3 GPS samples to detect mock location apps…"
     ),
-    steps.map((label,i) => {
-      const done   = samples.length > i;
-      const active = step===i && !done;
-      return e("div",{key:i,className:`gps-step${done?" done":active?" active":""}`},
-        e("span",{className:"gps-step-icon"}, done?"✓":active?"⟳":"○"),
-        e("span",{className:"gps-step-label"},label),
-        done && e("span",{className:"gps-step-meta"},
-          samples[i]?.accuracy ? `±${Math.round(samples[i].accuracy)}m` : "ok"
-        )
+    steps.map((label, i) => {
+      const done = samples.length > i;
+      const active = step === i && !done;
+      return e("div", { key: i, className: "gps-step" + (done ? " done" : active ? " active" : "") },
+        e("span", { className: "gps-step-icon" }, done ? "✓" : active ? "⟳" : "○"),
+        e("span", { className: "gps-step-label" }, label),
+        done ? e("span", { className: "gps-step-meta" },
+          samples[i]?.accuracy ? "±" + Math.round(samples[i].accuracy) + "m" : "ok"
+        ) : null
       );
     })
   );
 }
 
-function RoleBadge({ role }) {
-  return e("span",{className:`role-tag ${role}`}, role.toUpperCase());
-}
-
 // ── LOGIN PAGE ─────────────────────────────────────────────
 function LoginPage({ onLogin }) {
-  const [form, setForm] = useState({ userId:"teacher_001", password:"" });
-  const [loading, setL] = useState(false);
-  const [err, setErr]   = useState("");
-  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
+  const [userId, setUserId]     = useState("teacher_001");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading]   = useState(false);
+  const [err, setErr]           = useState("");
 
   const submit = async () => {
-    if (!form.userId || !form.password) { setErr("Fill all fields."); return; }
-    setL(true); setErr("");
+    if (!userId || !password) { setErr("Fill all fields."); return; }
+    setLoading(true); setErr("");
     try {
-      const data = await api("POST", "/auth/login", { user_id:form.userId, password:form.password });
-      Auth.set(data.token);
-      Auth.setUser(data.user);
+      // POST /auth/login → { token, user }
+      const data = await api("POST", "/auth/login", { user_id: userId, password });
+      setToken(data.token);   // store as "token" — matches getToken()
+      setUser(data.user);
       onLogin(data.user);
-    } catch(ex) { setErr(ex.message); }
-    setL(false);
+    } catch (ex) { setErr(ex.message); }
+    setLoading(false);
   };
 
-  return e("div", { className:"card" },
-    e("div",{className:"text-center",style:{marginBottom:20}},
-      e("div",{style:{fontSize:36,marginBottom:10}},"🔐"),
-      e("div",{style:{fontSize:20,fontWeight:800}},"Sign In"),
-      e("div",{style:{fontSize:12,color:"var(--muted)",marginTop:4}},
-        "Access token: 15 min · Refresh token: 7 days"
-      )
+  return e("div", { className: "card" },
+    e("div", { className: "text-center", style: { marginBottom: 20 } },
+      e("div", { style: { fontSize: 36, marginBottom: 10 } }, "🔐"),
+      e("div", { style: { fontSize: 20, fontWeight: 800 } }, "Teacher Login"),
+      e("div", { style: { fontSize: 12, color: "var(--muted)", marginTop: 4 } }, "JWT secured — 1 hour token")
     ),
-    e("div",{className:"field"},
-      e("label",null,"User ID"),
-      e("input",{placeholder:"teacher_001 / admin_001",value:form.userId,onChange:ev=>sf("userId",ev.target.value)})
+    e("div", { className: "field" },
+      e("label", null, "Teacher ID"),
+      e("input", { placeholder: "teacher_001", value: userId, onChange: ev => setUserId(ev.target.value) })
     ),
-    e("div",{className:"field"},
-      e("label",null,"Password"),
-      e("input",{type:"password",placeholder:"Password",value:form.password,
-        onChange:ev=>sf("password",ev.target.value),
-        onKeyDown:ev=>{if(ev.key==="Enter")submit();}
+    e("div", { className: "field" },
+      e("label", null, "Password"),
+      e("input", {
+        type: "password", placeholder: "Password", value: password,
+        onChange: ev => setPassword(ev.target.value),
+        onKeyDown: ev => { if (ev.key === "Enter") submit(); }
       }),
-      e("div",{className:"hint"},"Default: teacher123 / admin123 — CHANGE IN PRODUCTION")
+      e("div", { className: "hint" }, "Default: teacher123")
     ),
-    Alert({type:"error",icon:"✕",msg:err}),
-    e("button",{className:"btn btn-primary",onClick:submit,disabled:loading},
+    Alert({ type: "error", icon: "✕", msg: err }),
+    e("button", { className: "btn btn-primary", onClick: submit, disabled: loading },
       loading ? Spinner() : "Sign In →"
     )
   );
@@ -376,483 +373,315 @@ function LoginPage({ onLogin }) {
 
 // ── STUDENT PAGE ───────────────────────────────────────────
 function StudentPage() {
-  const [step, setStep]   = useState("form"); // form|gps|otp|success
-  const [form, setForm]   = useState({studentId:"",studentName:"",sessionId:"",wifiSsid:""});
-  const [gps, setGps]     = useState(null);
-  const [samples, setSmp] = useState([]);
-  const [gpsStep, setGS]  = useState(0);
-  const [attempts, setAtt]= useState(0);
-  const [err, setErr]     = useState("");
-  const [loading, setL]   = useState(false);
-  const [result, setRes]  = useState(null);
-  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
+  const [step, setStep]     = useState("form"); // form | gps | otp | success
+  const [form, setForm]     = useState({ studentId: "", studentName: "", sessionId: "", wifiSsid: "" });
+  const [gps, setGps]       = useState(null);
+  const [samples, setSmp]   = useState([]);
+  const [gpsStep, setGS]    = useState(0);
+  const [attempts, setAtt]  = useState(0);
+  const [err, setErr]       = useState("");
+  const [loading, setL]     = useState(false);
+  const [result, setRes]    = useState(null);
+  const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const startGPS = async () => {
-    if (!form.studentId||!form.studentName||!form.sessionId) { setErr("Fill all fields."); return; }
+    if (!form.studentId || !form.studentName || !form.sessionId) { setErr("Fill all fields."); return; }
     setErr(""); setStep("gps"); setSmp([]); setGS(0);
     try {
       const collected = [];
-      for (let i=0; i<3; i++) {
+      for (let i = 0; i < 3; i++) {
         setGS(i);
-        const pos = await new Promise((res,rej) =>
+        const pos = await new Promise((res, rej) =>
           navigator.geolocation.getCurrentPosition(
-            p=>res({lat:p.coords.latitude,lon:p.coords.longitude,accuracy:p.coords.accuracy}),
-            er=>rej(["Location permission denied","GPS unavailable","GPS timed out"][er.code-1]||"GPS error"),
-            {enableHighAccuracy:true,timeout:10000,maximumAge:0}
+            p => res({ lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy }),
+            er => rej(["Location permission denied", "GPS unavailable", "GPS timed out"][er.code - 1] || "GPS error"),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
           )
         );
         collected.push(pos);
         setSmp([...collected]);
-        if (i<2) await new Promise(r=>setTimeout(r,2000));
+        if (i < 2) await new Promise(r => setTimeout(r, 2000));
       }
-      setGps({...collected[collected.length-1], samples:collected});
+      const last = collected[collected.length - 1];
+      setGps({ ...last, samples: collected });
       setStep("otp");
-    } catch(ex) { setErr(String(ex)); setStep("form"); }
+    } catch (ex) { setErr(String(ex)); setStep("form"); }
   };
 
   const submit = async (otpVal) => {
     setL(true); setErr("");
     try {
-      const data = await api("POST","/attendance/mark",{
-        session_id: parseInt(form.sessionId),
-        otp: otpVal,
-        lat: gps.lat, lon: gps.lon, accuracy: gps.accuracy,
-        gps_samples: gps.samples||[],
-        student_id: form.studentId,
+      // POST /attendance/mark — no auth required (student route)
+      const data = await api("POST", "/attendance/mark", {
+        session_id:  parseInt(form.sessionId),
+        otp:         otpVal,
+        lat:         gps.lat,
+        lon:         gps.lon,
+        accuracy:    gps.accuracy,
+        gps_samples: gps.samples || [],
+        student_id:  form.studentId,
         student_name: form.studentName,
-        device_id: getDeviceId(),
-        wifi_ssid: form.wifiSsid||null,
+        device_id:   getDeviceId(),
+        wifi_ssid:   form.wifiSsid || null,
       });
       setRes(data); setStep("success");
-    } catch(ex) { setErr(ex.message); setAtt(a=>a+1); }
+    } catch (ex) { setErr(ex.message); setAtt(a => a + 1); }
     setL(false);
   };
 
-  if (step==="success") return e("div",null,
-    e("div",{className:"card text-center"},
-      e("div",{className:"success-check"},"✓"),
-      e("div",{style:{fontSize:20,fontWeight:800}},"Attendance Marked!"),
-      e("div",{style:{color:"var(--muted)",fontSize:13,marginTop:6}},
-        result?.student_name+" · "+result?.distance_m?.toFixed(1)+"m from classroom"
+  if (step === "success") return e("div", null,
+    e("div", { className: "card text-center" },
+      e("div", { className: "success-check" }, "✓"),
+      e("div", { style: { fontSize: 20, fontWeight: 800 } }, "Attendance Marked!"),
+      e("div", { style: { color: "var(--muted)", fontSize: 13, marginTop: 6 } },
+        result?.student_name + " · " + (result?.distance_m || 0).toFixed(1) + "m from classroom"
       ),
-      e("div",{style:{marginTop:8,display:"flex",gap:6,justifyContent:"center",flexWrap:"wrap"}},
-        e("span",{className:`badge ${result?.wifi_status==="verified"?"green":result?.wifi_status==="partial"?"amber":"red"}`},
-          "WiFi: "+(result?.wifi_status||"n/a")
-        ),
-        result?.flagged && e("span",{className:"badge amber"},
-          e("span",{className:"dot"})," Flagged"
+      result?.flagged && e("div", { className: "mt-12" },
+        e("span", { className: "badge amber" }, e("span", { className: "dot" }), " Flagged for review")
+      ),
+      e("button", {
+        className: "btn btn-outline mt-16",
+        onClick: () => { setStep("form"); setGps(null); setSmp([]); setAtt(0); setErr(""); }
+      }, "Mark Another")
+    )
+  );
+
+  if (step === "gps") return e("div", null,
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "Verifying Your Location"),
+      e(GPSProgress, { step: gpsStep, samples }),
+      e("button", { className: "btn btn-outline mt-12", onClick: () => setStep("form") }, "← Cancel")
+    )
+  );
+
+  if (step === "otp") return e("div", null,
+    gps && e("div", { className: "gps-bar" },
+      e("span", null, "📍"),
+      e("div", null,
+        e("div", { style: { fontWeight: 700, fontSize: 12 } }, "3-Sample GPS Verified"),
+        e("div", { className: "gps-coords" },
+          gps.lat.toFixed(5) + ", " + gps.lon.toFixed(5) + " · ±" + Math.round(gps.accuracy || 0) + "m"
         )
       ),
-      e("button",{className:"btn btn-outline mt-16",
-        onClick:()=>{setStep("form");setGps(null);setSmp([]);setAtt(0);setErr("");}
-      },"Mark Another")
-    )
-  );
-
-  if (step==="gps") return e("div",null,
-    e("div",{className:"card"},
-      e("div",{className:"card-title"},"Verifying Your Location"),
-      e(GPSProgress,{step:gpsStep,samples}),
-      e("button",{className:"btn btn-outline mt-12",onClick:()=>setStep("form")},"← Cancel")
-    )
-  );
-
-  if (step==="otp") return e("div",null,
-    gps && e("div",{className:"gps-bar"},
-      e("span",null,"📍"),
-      e("div",null,
-        e("div",{style:{fontWeight:700,fontSize:12}},"3-Sample GPS Verified"),
-        e("div",{className:"gps-coords"},gps.lat?.toFixed(5)+", "+gps.lon?.toFixed(5)+" · ±"+Math.round(gps.accuracy||0)+"m")
-      ),
-      e("span",{className:"badge green",style:{marginLeft:"auto"}},e("span",{className:"dot"})," Live")
+      e("span", { className: "badge green", style: { marginLeft: "auto" } },
+        e("span", { className: "dot" }), " Live"
+      )
     ),
-    e("div",{className:"card"},
-      e("div",{className:"card-title"},"Enter OTP"),
-      e("div",{style:{fontSize:13,color:"var(--muted)",marginBottom:18}},
-        "Enter the 6-digit code shown on the projector. 3 attempts allowed."
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "Enter OTP"),
+      e("div", { style: { fontSize: 13, color: "var(--muted)", marginBottom: 18 } },
+        "Enter the 6-digit code from the board. 3 attempts allowed."
       ),
-      e(OTPDigitInput,{onComplete:submit,disabled:loading}),
-      attempts>0 && e(AttemptDots,{used:attempts,max:3}),
-      Alert({type:"error",icon:"✕",msg:err}),
-      loading && e("div",{style:{textAlign:"center",marginTop:14}},Spinner()),
-      e("button",{className:"btn btn-outline mt-12",onClick:()=>setStep("form")},"← Back")
+      e(OTPDigitInput, { onComplete: submit, disabled: loading }),
+      attempts > 0 && e(AttemptDots, { used: attempts, max: 3 }),
+      Alert({ type: "error", icon: "✕", msg: err }),
+      loading && e("div", { style: { textAlign: "center", marginTop: 14 } }, Spinner()),
+      e("button", { className: "btn btn-outline mt-12", onClick: () => setStep("form") }, "← Back")
     )
   );
 
   // form step
-  return e("div",null,
-    e("div",{className:"card"},
-      e("div",{className:"card-title"},"Your Details"),
-      e("div",{className:"field"},
-        e("label",null,"Session ID"),
-        e("input",{type:"number",placeholder:"Session ID from teacher",value:form.sessionId,onChange:ev=>sf("sessionId",ev.target.value)})
+  return e("div", null,
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "Your Details"),
+      e("div", { className: "field" },
+        e("label", null, "Session ID"),
+        e("input", { type: "number", placeholder: "Session ID from teacher",
+          value: form.sessionId, onChange: ev => sf("sessionId", ev.target.value) })
       ),
-      e("div",{className:"field"},
-        e("label",null,"Student ID"),
-        e("input",{placeholder:"e.g. 2023CS042",value:form.studentId,onChange:ev=>sf("studentId",ev.target.value)})
+      e("div", { className: "field" },
+        e("label", null, "Student ID"),
+        e("input", { placeholder: "e.g. 2023CS042",
+          value: form.studentId, onChange: ev => sf("studentId", ev.target.value) })
       ),
-      e("div",{className:"field"},
-        e("label",null,"Full Name"),
-        e("input",{placeholder:"Your full name",value:form.studentName,onChange:ev=>sf("studentName",ev.target.value)})
+      e("div", { className: "field" },
+        e("label", null, "Full Name"),
+        e("input", { placeholder: "Your full name",
+          value: form.studentName, onChange: ev => sf("studentName", ev.target.value) })
       ),
-      e("div",{className:"field"},
-        e("label",null,"Campus WiFi SSID"),
-        e("input",{placeholder:"e.g. CampusWiFi (optional)",value:form.wifiSsid,onChange:ev=>sf("wifiSsid",ev.target.value)}),
-        e("div",{className:"hint"},"Reduces fraud flags — enter exactly as shown in WiFi settings")
+      e("div", { className: "field" },
+        e("label", null, "Campus WiFi SSID (optional)"),
+        e("input", { placeholder: "e.g. CampusWiFi",
+          value: form.wifiSsid, onChange: ev => sf("wifiSsid", ev.target.value) }),
+        e("div", { className: "hint" }, "Helps reduce fraud flags")
       ),
-      Alert({type:"error",icon:"✕",msg:err}),
-      Alert({type:"info",icon:"🛡",msg:"3-sample GPS + WiFi check to prevent location spoofing."}),
-      e("button",{className:"btn btn-primary",onClick:startGPS},"Verify Location & Continue →")
+      Alert({ type: "error", icon: "✕", msg: err }),
+      Alert({ type: "info", icon: "🛡", msg: "GPS sampled 3× to detect mock location apps." }),
+      e("button", { className: "btn btn-primary", onClick: startGPS }, "Verify Location & Continue →")
     )
   );
 }
 
 // ── TEACHER PAGE ───────────────────────────────────────────
 function TeacherPage({ user, onLogout }) {
-  const [view, setView]     = useState("start");
-  const [session, setSess]  = useState(null);
-  const [otpTime, setOT]    = useState(null);
-  const [records, setRec]   = useState([]);
-  const [loading, setL]     = useState(false);
-  const [err, setErr]       = useState("");
-  const [form, setForm]     = useState({subject:"Computer Networks",lat:"28.7041",lon:"77.1025",radius:"100"});
-  const sf = (k,v) => setForm(f=>({...f,[k]:v}));
+  const [view, setView]    = useState("start");   // start | session
+  const [session, setSess] = useState(null);
+  const [otpTime, setOT]   = useState(null);
+  const [records, setRec]  = useState([]);
+  const [loading, setL]    = useState(false);
+  const [err, setErr]      = useState("");
+  const [form, setForm]    = useState({ subject: "Computer Networks", lat: "28.7041", lon: "77.1025", radius: "100" });
+  const sf = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const fetchRec = useCallback(async () => {
     if (!session) return;
-    try { const d = await api("GET",`/attendance/list/${session.session_id}`); setRec(d.records||[]); } catch{}
+    try {
+      // GET /attendance/list/:id
+      const d = await api("GET", "/attendance/list/" + session.session_id);
+      setRec(d.records || []);
+    } catch (ex) { console.error("fetchRec:", ex.message); }
   }, [session]);
 
   useEffect(() => {
-    if (view!=="session") return;
+    if (view !== "session") return;
     fetchRec();
-    const iv = setInterval(fetchRec,5000);
-    return ()=>clearInterval(iv);
-  }, [view,fetchRec]);
+    const iv = setInterval(fetchRec, 5000);
+    return () => clearInterval(iv);
+  }, [view, fetchRec]);
 
   const startSession = async () => {
     setL(true); setErr("");
     try {
-      const d = await api("POST","/session/start",{
-        subject:form.subject,lat:parseFloat(form.lat),lon:parseFloat(form.lon),radius:parseInt(form.radius)
-      },true);
+      // POST /session/start — Authorization header sent automatically via api()
+      const d = await api("POST", "/session/start", {
+        subject: form.subject,
+        lat:     parseFloat(form.lat),
+        lon:     parseFloat(form.lon),
+        radius:  parseInt(form.radius),
+      });
       setSess(d); setOT(Date.now()); setView("session");
-    } catch(ex){setErr(ex.message);}
+    } catch (ex) { setErr(ex.message); }
     setL(false);
   };
 
   const refreshOTP = async () => {
     try {
-      const d = await api("POST",`/session/refresh-otp/${session.session_id}`,null,true);
-      setSess(s=>({...s,otp:d.otp})); setOT(Date.now());
-    } catch(ex){setErr(ex.message);}
+      // POST /session/refresh-otp/:id
+      const d = await api("POST", "/session/refresh-otp/" + session.session_id);
+      setSess(s => ({ ...s, otp: d.otp })); setOT(Date.now());
+    } catch (ex) { setErr(ex.message); }
   };
 
   const endSession = async () => {
-    await api("POST",`/session/end/${session.session_id}`,null,true);
+    try { await api("POST", "/session/end/" + session.session_id); } catch {}
     setView("start"); setSess(null); setRec([]);
   };
 
   const doLogout = async () => {
-    try { await api("POST","/auth/logout",null,true); } catch{}
-    Auth.clear(); onLogout();
+    try { await api("POST", "/auth/logout"); } catch {}
+    clearAuth(); onLogout();
   };
 
-  const total=records.length, flagged=records.filter(r=>r.is_flagged).length;
+  const total   = records.length;
+  const flagged = records.filter(r => r.is_flagged).length;
 
-  if (view==="session"&&session) return e("div",null,
-    e("div",{className:"user-bar"},
-      e("div",null,
-        e("div",{className:"user-name"},"👩‍🏫 "+user.name),
-        e("div",{className:"user-role"},"Teacher · JWT Authenticated")
+  // ── SESSION ACTIVE VIEW ──
+  if (view === "session" && session) return e("div", null,
+    e("div", { className: "user-bar" },
+      e("div", null,
+        e("div", { className: "user-name" }, "👩‍🏫 " + user.name),
+        e("div", { className: "user-role" }, "Teacher · JWT Authenticated")
       ),
-      e("button",{className:"btn btn-outline btn-sm",onClick:doLogout},"Logout")
+      e("button", { className: "btn btn-outline btn-sm", onClick: doLogout }, "Logout")
     ),
-    e("div",{className:"session-pill"},
-      e("div",null,
-        e("div",{className:"session-info"},session.subject),
-        e("div",{className:"session-meta"},"Session #"+session.session_id+" · "+session.geofence_radius+"m radius")
+    e("div", { className: "session-pill" },
+      e("div", null,
+        e("div", { className: "session-info" }, session.subject),
+        e("div", { className: "session-meta" }, "Session #" + session.session_id + " · " + session.geofence_radius + "m radius")
       ),
-      e("span",{className:"badge green"},e("span",{className:"dot pulse"})," Live")
+      e("span", { className: "badge green" }, e("span", { className: "dot pulse" }), " Live")
     ),
-    e("div",{className:"card"},
-      e("div",{className:"flex-between",style:{marginBottom:4}},
-        e("div",{className:"card-title",style:{marginBottom:0}},"OTP (SHA-256 hashed)"),
-        e("button",{className:"btn btn-outline btn-sm",onClick:refreshOTP},"↻ Refresh")
+    e("div", { className: "card" },
+      e("div", { className: "flex-between", style: { marginBottom: 4 } },
+        e("div", { className: "card-title", style: { marginBottom: 0 } }, "Current OTP"),
+        e("button", { className: "btn btn-outline btn-sm", onClick: refreshOTP }, "↻ Refresh")
       ),
-      e("div",{className:"otp-display"},
-        e("div",{className:"otp-number"},session.otp),
-        e("div",{className:"otp-label"},"Show on projector — plaintext never stored")
+      e("div", { className: "otp-display" },
+        e("div", { className: "otp-number" }, session.otp),
+        e("div", { className: "otp-label" }, "Show this to students")
       ),
-      otpTime && e(OTPTimer,{startTime:otpTime,duration:60,onExpire:refreshOTP})
+      otpTime && e(OTPTimer, { startTime: otpTime, duration: 60, onExpire: refreshOTP })
     ),
-    e("div",{className:"stats-row"},
-      e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--accent)"}},total),e("div",{className:"stat-label"},"Total")),
-      e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--green)"}},total-flagged),e("div",{className:"stat-label"},"Clean")),
-      e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--red)"}},flagged),e("div",{className:"stat-label"},"Flagged"))
-    ),
-    records.length>0 && e("div",{className:"card"},
-      e("div",{className:"flex-between",style:{marginBottom:12}},
-        e("div",{className:"card-title",style:{marginBottom:0}},"Live Attendance"),
-        e("button",{className:"btn btn-outline btn-sm",onClick:fetchRec},"↻")
+    e("div", { className: "stats-row" },
+      e("div", { className: "stat-box" },
+        e("div", { className: "stat-value", style: { color: "var(--accent)" } }, total),
+        e("div", { className: "stat-label" }, "Total")
       ),
-      e("div",{className:"scroll-box"},
-        e("table",{className:"tbl"},
-          e("thead",null,e("tr",null,e("th",null,"Student"),e("th",null,"Dist"),e("th",null,"Risk"),e("th",null,"Status"))),
-          e("tbody",null,
-            records.map((r,i)=>e("tr",{key:i,className:r.is_flagged?"flagged":""},
-              e("td",null,e("div",{className:"s-name"},r.student_name),e("div",{className:"s-id"},r.student_id)),
-              e("td",null,e("span",{className:"mono-sm"},r.distance?.toFixed(0)+"m")),
-              e("td",null,e("span",{className:`badge ${r.risk_level==="HIGH"?"red":r.risk_level==="MEDIUM"?"amber":"green"}`},r.risk_score||0)),
-              e("td",null,r.is_flagged
-                ?e("span",{className:"badge red",title:r.flag_reason},"⚠ "+r.flag_reason?.split(",")[0])
-                :e("span",{className:"badge green"},"✓ OK")
+      e("div", { className: "stat-box" },
+        e("div", { className: "stat-value", style: { color: "var(--green)" } }, total - flagged),
+        e("div", { className: "stat-label" }, "Clean")
+      ),
+      e("div", { className: "stat-box" },
+        e("div", { className: "stat-value", style: { color: "var(--red)" } }, flagged),
+        e("div", { className: "stat-label" }, "Flagged")
+      )
+    ),
+    records.length > 0 && e("div", { className: "card" },
+      e("div", { className: "flex-between", style: { marginBottom: 12 } },
+        e("div", { className: "card-title", style: { marginBottom: 0 } }, "Live Attendance"),
+        e("button", { className: "btn btn-outline btn-sm", onClick: fetchRec }, "↻")
+      ),
+      e("div", { className: "scroll-box" },
+        e("table", { className: "tbl" },
+          e("thead", null, e("tr", null,
+            e("th", null, "Student"), e("th", null, "Dist"), e("th", null, "Status")
+          )),
+          e("tbody", null,
+            records.map((r, i) => e("tr", { key: i, className: r.is_flagged ? "flagged" : "" },
+              e("td", null,
+                e("div", { className: "s-name" }, r.student_name),
+                e("div", { className: "s-id" }, r.student_id)
+              ),
+              e("td", null, e("span", { className: "mono-sm" }, (r.distance || 0).toFixed(0) + "m")),
+              e("td", null, r.is_flagged
+                ? e("span", { className: "badge red", title: r.flag_reason }, "⚠ " + (r.flag_reason || "").split(",")[0])
+                : e("span", { className: "badge green" }, "✓ OK")
               )
             ))
           )
         )
       )
     ),
-    Alert({type:"error",icon:"✕",msg:err}),
-    e("button",{className:"btn btn-danger mt-12",onClick:endSession},"End Session")
+    Alert({ type: "error", icon: "✕", msg: err }),
+    e("button", { className: "btn btn-danger mt-12", onClick: endSession }, "End Session")
   );
 
-  return e("div",null,
-    e("div",{className:"user-bar"},
-      e("div",null,
-        e("div",{className:"user-name"},"👩‍🏫 "+user.name),
-        e("div",{className:"user-role"},"Teacher · JWT Authenticated")
+  // ── START SESSION VIEW ──
+  return e("div", null,
+    e("div", { className: "user-bar" },
+      e("div", null,
+        e("div", { className: "user-name" }, "👩‍🏫 " + user.name),
+        e("div", { className: "user-role" }, "Teacher · JWT Authenticated")
       ),
-      e("button",{className:"btn btn-outline btn-sm",onClick:doLogout},"Logout")
+      e("button", { className: "btn btn-outline btn-sm", onClick: doLogout }, "Logout")
     ),
-    e("div",{className:"card"},
-      e("div",{className:"card-title"},"New Session"),
-      e("div",{className:"field"},
-        e("label",null,"Subject"),
-        e("select",{value:form.subject,onChange:ev=>sf("subject",ev.target.value)},
-          ["Computer Networks","Data Structures","Operating Systems","DBMS","Software Engineering",
-           "Machine Learning","Web Technologies","Computer Architecture","Discrete Mathematics"]
-          .map(s=>e("option",{key:s,value:s},s))
+    e("div", { className: "card" },
+      e("div", { className: "card-title" }, "New Session"),
+      e("div", { className: "field" },
+        e("label", null, "Subject"),
+        e("select", { value: form.subject, onChange: ev => sf("subject", ev.target.value) },
+          ["Computer Networks", "Data Structures", "Operating Systems", "DBMS",
+           "Software Engineering", "Machine Learning", "Web Technologies", "Computer Architecture"]
+          .map(s => e("option", { key: s, value: s }, s))
         )
       ),
-      e("div",{className:"row"},
-        e("div",{className:"field",style:{flex:1}},e("label",null,"Latitude"),e("input",{type:"number",step:"0.0001",value:form.lat,onChange:ev=>sf("lat",ev.target.value)})),
-        e("div",{className:"field",style:{flex:1}},e("label",null,"Longitude"),e("input",{type:"number",step:"0.0001",value:form.lon,onChange:ev=>sf("lon",ev.target.value)}))
-      ),
-      e("div",{className:"field"},
-        e("label",null,"Geofence Radius (m)"),
-        e("input",{type:"number",value:form.radius,onChange:ev=>sf("radius",ev.target.value)})
-      ),
-      Alert({type:"error",icon:"✕",msg:err}),
-      e("button",{className:"btn btn-primary",onClick:startSession,disabled:loading},
-        loading?Spinner():"🚀 Start Session"
-      )
-    )
-  );
-}
-
-// ── ADMIN PAGE ─────────────────────────────────────────────
-function AdminPage({ user, onLogout }) {
-  const [subTab, setSub]  = useState("stats");
-  const [stats, setStats] = useState(null);
-  const [audit, setAudit] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [sessions, setSes]= useState([]);
-  const [loading, setL]   = useState(false);
-  const [err, setErr]     = useState("");
-  const [newUser, setNU]  = useState({userId:"",name:"",password:"",role:"teacher",dept:""});
-  const snu = (k,v) => setNU(u=>({...u,[k]:v}));
-
-  const loadStats = useCallback(async () => {
-    setL(true);
-    try {
-      const d = await api("GET","/admin/stats",null,true);
-      setStats(d);
-    } catch(ex){setErr(ex.message);}
-    setL(false);
-  },[]);
-
-  const loadAudit = useCallback(async () => {
-    setL(true);
-    try { const d=await api("GET","/admin/audit-log?limit=50",null,true); setAudit(d.entries||[]); }
-    catch(ex){setErr(ex.message);}
-    setL(false);
-  },[]);
-
-  const loadUsers = useCallback(async () => {
-    setL(true);
-    try { const d=await api("GET","/admin/users",null,true); setUsers(d.users||[]); }
-    catch(ex){setErr(ex.message);}
-    setL(false);
-  },[]);
-
-  const loadSessions = useCallback(async () => {
-    setL(true);
-    try { const d=await api("GET","/admin/sessions",null,true); setSes(d.sessions||[]); }
-    catch(ex){setErr(ex.message);}
-    setL(false);
-  },[]);
-
-  useEffect(()=>{
-    if(subTab==="stats")    loadStats();
-    if(subTab==="audit")    loadAudit();
-    if(subTab==="users")    loadUsers();
-    if(subTab==="sessions") loadSessions();
-  },[subTab]);
-
-  const createUser = async () => {
-    if (!newUser.userId||!newUser.name||!newUser.password){setErr("Fill all fields.");return;}
-    try {
-      await api("POST","/admin/users",{user_id:newUser.userId,name:newUser.name,password:newUser.password,role:newUser.role,dept:newUser.dept},true);
-      setNU({userId:"",name:"",password:"",role:"teacher",dept:""});
-      loadUsers();
-    } catch(ex){setErr(ex.message);}
-  };
-
-  const doLogout = async () => {
-    try { await api("POST","/auth/logout",null,true); } catch{}
-    Auth.clear(); onLogout();
-  };
-
-  const auditColor = t => t?.toLowerCase().replace(/_/g,"_")||"";
-
-  return e("div",null,
-    e("div",{className:"user-bar"},
-      e("div",null,
-        e("div",{className:"user-name"},"🛡 "+user.name),
-        e("div",{className:"user-role"},"Admin · Full Access")
-      ),
-      e("button",{className:"btn btn-outline btn-sm",onClick:doLogout},"Logout")
-    ),
-
-    // Sub-tab bar
-    e("div",{className:"sub-tabs"},
-      ["stats","audit","users","sessions"].map(t=>
-        e("button",{key:t,className:`sub-tab${subTab===t?" active":""}`,onClick:()=>setSub(t)},
-          {stats:"📊 Stats",audit:"🔎 Audit Log",users:"👥 Users",sessions:"📋 Sessions"}[t]
-        )
-      )
-    ),
-
-    Alert({type:"error",icon:"✕",msg:err}),
-
-    // ── STATS ──
-    subTab==="stats" && e("div",null,
-      loading && e("div",{className:"empty-state"},Spinner()),
-      stats && e("div",null,
-        e("div",{className:"stats-row"},
-          e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--accent)"}},stats.stats?.total_sessions||0),e("div",{className:"stat-label"},"Sessions")),
-          e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--cyan)"}},stats.stats?.total_teachers||0),e("div",{className:"stat-label"},"Teachers")),
-          e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--green)"}},stats.stats?.unique_students||0),e("div",{className:"stat-label"},"Students"))
+      e("div", { className: "row" },
+        e("div", { className: "field", style: { flex: 1 } },
+          e("label", null, "Latitude"),
+          e("input", { type: "number", step: "0.0001", value: form.lat, onChange: ev => sf("lat", ev.target.value) })
         ),
-        e("div",{className:"stats-row"},
-          e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--text)"}},stats.stats?.total_attendance||0),e("div",{className:"stat-label"},"Total Att.")),
-          e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--red)"}},stats.stats?.total_flagged||0),e("div",{className:"stat-label"},"Flagged")),
-          e("div",{className:"stat-box"},e("div",{className:"stat-value",style:{color:"var(--amber)"}},Math.round(stats.stats?.avg_risk_score||0)),e("div",{className:"stat-label"},"Avg Risk"))
-        ),
-        stats.recent_flags?.length>0 && e("div",{className:"card"},
-          e("div",{className:"card-title"},"Recent Flagged Records"),
-          e("div",{className:"scroll-box"},
-            e("table",{className:"tbl"},
-              e("thead",null,e("tr",null,e("th",null,"Student"),e("th",null,"Subject"),e("th",null,"Risk"),e("th",null,"Flags"))),
-              e("tbody",null,
-                stats.recent_flags.map((r,i)=>e("tr",{key:i},
-                  e("td",null,e("div",{className:"s-name"},r.student_id),e("div",{className:"s-id"},fmtDate(r.marked_at))),
-                  e("td",null,e("span",{className:"mono-sm"},r.subject)),
-                  e("td",null,e("span",{className:`badge ${r.risk_level==="HIGH"?"red":"amber"}`},r.risk_level)),
-                  e("td",null,e("span",{className:"mono-sm",title:r.flag_reason},(r.flag_reason||"").split(",")[0]))
-                ))
-              )
-            )
-          )
+        e("div", { className: "field", style: { flex: 1 } },
+          e("label", null, "Longitude"),
+          e("input", { type: "number", step: "0.0001", value: form.lon, onChange: ev => sf("lon", ev.target.value) })
         )
-      )
-    ),
-
-    // ── AUDIT LOG ──
-    subTab==="audit" && e("div",null,
-      e("div",{className:"flex-between",style:{marginBottom:12}},
-        e("div",{style:{fontSize:13,fontWeight:700}},"Security Audit Log"),
-        e("button",{className:"btn btn-outline btn-sm",onClick:loadAudit},"↻ Refresh")
       ),
-      loading && e("div",{className:"empty-state"},Spinner()),
-      !loading && audit.length===0 && e("div",{className:"empty-state"},"No audit events yet."),
-      !loading && e("div",{className:"card",style:{padding:0,overflow:"hidden"}},
-        e("div",{className:"scroll-box"},
-          audit.map((entry,i)=>e("div",{key:i,className:"audit-entry"},
-            e("span",{className:`audit-type ${auditColor(entry.event_type)}`},
-              (entry.event_type||"").replace(/_/g," ")
-            ),
-            e("div",{style:{flex:1,minWidth:0}},
-              e("div",{className:"audit-actor"},entry.actor_id||"—"),
-              e("div",{className:"audit-meta"},
-                (entry.ip_address||"")+" · "+fmtDate(entry.created_at)
-              )
-            )
-          ))
-        )
-      )
-    ),
-
-    // ── USERS ──
-    subTab==="users" && e("div",null,
-      e("div",{className:"card"},
-        e("div",{className:"card-title"},"Create New User"),
-        e("div",{className:"row"},
-          e("div",{className:"field",style:{flex:1}},e("label",null,"User ID"),e("input",{placeholder:"teacher_003",value:newUser.userId,onChange:ev=>snu("userId",ev.target.value)})),
-          e("div",{className:"field",style:{flex:1}},e("label",null,"Role"),
-            e("select",{value:newUser.role,onChange:ev=>snu("role",ev.target.value)},
-              ["admin","teacher","student"].map(r=>e("option",{key:r,value:r},r))
-            )
-          )
-        ),
-        e("div",{className:"field"},e("label",null,"Full Name"),e("input",{placeholder:"Name",value:newUser.name,onChange:ev=>snu("name",ev.target.value)})),
-        e("div",{className:"row"},
-          e("div",{className:"field",style:{flex:1}},e("label",null,"Password"),e("input",{type:"password",placeholder:"Min 8 chars",value:newUser.password,onChange:ev=>snu("password",ev.target.value)})),
-          e("div",{className:"field",style:{flex:1}},e("label",null,"Dept"),e("input",{placeholder:"Department",value:newUser.dept,onChange:ev=>snu("dept",ev.target.value)}))
-        ),
-        e("button",{className:"btn btn-primary",onClick:createUser},"Create User")
+      e("div", { className: "field" },
+        e("label", null, "Geofence Radius (m)"),
+        e("input", { type: "number", value: form.radius, onChange: ev => sf("radius", ev.target.value) })
       ),
-      loading && e("div",{className:"empty-state"},Spinner()),
-      !loading && users.length>0 && e("div",{className:"card",style:{padding:0,overflow:"hidden"}},
-        e("div",{className:"scroll-box"},
-          e("table",{className:"tbl"},
-            e("thead",null,e("tr",null,e("th",null,"User"),e("th",null,"Dept"),e("th",null,"Role"))),
-            e("tbody",null,
-              users.map((u,i)=>e("tr",{key:i},
-                e("td",null,e("div",{className:"s-name"},u.name),e("div",{className:"s-id"},u.id)),
-                e("td",null,e("span",{className:"mono-sm"},u.dept||"—")),
-                e("td",null,e(RoleBadge,{role:u.role}))
-              ))
-            )
-          )
-        )
-      )
-    ),
-
-    // ── SESSIONS ──
-    subTab==="sessions" && e("div",null,
-      e("div",{className:"flex-between",style:{marginBottom:12}},
-        e("div",{style:{fontSize:13,fontWeight:700}},"All Sessions"),
-        e("button",{className:"btn btn-outline btn-sm",onClick:loadSessions},"↻ Refresh")
-      ),
-      loading && e("div",{className:"empty-state"},Spinner()),
-      !loading && sessions.length===0 && e("div",{className:"empty-state"},"No sessions yet."),
-      !loading && sessions.length>0 && e("div",{className:"card",style:{padding:0,overflow:"hidden"}},
-        e("div",{className:"scroll-box"},
-          e("table",{className:"tbl"},
-            e("thead",null,e("tr",null,e("th",null,"Subject"),e("th",null,"Teacher"),e("th",null,"Att."),e("th",null,"Flag"),e("th",null,"Status"))),
-            e("tbody",null,
-              sessions.map((s,i)=>e("tr",{key:i},
-                e("td",null,e("div",{className:"s-name"},s.subject),e("div",{className:"s-id"},fmtDate(s.created_at))),
-                e("td",null,e("span",{className:"mono-sm"},s.teacher_id)),
-                e("td",null,e("span",{className:"mono-sm"},s.attendance_count||0)),
-                e("td",null,s.flagged_count>0?e("span",{className:"badge red"},s.flagged_count):e("span",{className:"badge green"},"0")),
-                e("td",null,s.is_active?e("span",{className:"badge green"},e("span",{className:"dot pulse"})," Live"):e("span",{className:"badge",style:{color:"var(--muted)"}},"Ended"))
-              ))
-            )
-          )
-        )
+      Alert({ type: "error", icon: "✕", msg: err }),
+      e("button", { className: "btn btn-primary", onClick: startSession, disabled: loading },
+        loading ? Spinner() : "🚀 Start Session"
       )
     )
   );
@@ -860,56 +689,42 @@ function AdminPage({ user, onLogout }) {
 
 // ── APP ROOT ───────────────────────────────────────────────
 function App() {
-  const [tab,  setTab]  = useState("student");
-  const [user, setUser] = useState(Auth.getUser);
+  const [tab, setTab]   = useState("student");
+  const [user, setUser] = useState(getUser);
 
-  const handleLogin = u => setUser(u);
+  const handleLogin  = u => setUser(u);
   const handleLogout = () => setUser(null);
 
-  const staffTabs = user?.role === "admin"
-    ? [["student","👨‍🎓 Student"],["teacher","👩‍🏫 Teacher"],["admin","🛡 Admin"]]
-    : [["student","👨‍🎓 Student"],["teacher","👩‍🏫 Teacher"]];
-
-  return e("div",{className:"app"},
-    e("div",{className:"header"},
-      e("div",{className:"logo"},
-        e("div",{className:"logo-icon"},"📡"),
-        e("div",null,
-          e("div",{className:"logo-text"},"SmartAttend"),
-          e("div",{className:"logo-sub"},"v3 · PRODUCTION")
+  return e("div", { className: "app" },
+    e("div", { className: "header" },
+      e("div", { className: "logo" },
+        e("div", { className: "logo-icon" }, "📡"),
+        e("div", null,
+          e("div", { className: "logo-text" }, "SmartAttend"),
+          e("div", { className: "logo-sub" }, "v2 · SECURE")
         )
       ),
-      e("span",{className:"badge blue"},"v3.0")
+      e("span", { className: "badge blue" }, "v2.0")
     ),
-
-    e("div",{className:"security-bar"},
-      ["SHA-256 OTP","JWT+Refresh","Rate Limit","3-Sample GPS","WiFi Check","Audit Log","Role System"]
-      .map(c=>e("span",{key:c,className:"sec-chip"},c))
+    e("div", { className: "security-bar" },
+      ["SHA-256 OTP", "JWT Auth", "Rate Limit", "3-Sample GPS", "Anomaly Detect"]
+      .map(c => e("span", { key: c, className: "sec-chip" }, c))
     ),
-
-    e("div",{className:"tab-bar"},
-      staffTabs.map(([id,label])=>
-        e("button",{key:id,className:`tab${tab===id?" active":""}`,onClick:()=>setTab(id)},label)
-      )
+    e("div", { className: "tab-bar" },
+      e("button", { className: "tab" + (tab === "student" ? " active" : ""), onClick: () => setTab("student") }, "👨‍🎓 Student"),
+      e("button", { className: "tab" + (tab === "teacher" ? " active" : ""), onClick: () => setTab("teacher") }, "👩‍🏫 Teacher")
     ),
-
-    tab==="student" && e(StudentPage),
-
-    tab==="teacher" && (
-      user && (user.role==="teacher"||user.role==="admin")
-        ? e(TeacherPage,{user,onLogout:handleLogout})
-        : e(LoginPage,{onLogin:handleLogin})
-    ),
-
-    tab==="admin" && (
-      user?.role==="admin"
-        ? e(AdminPage,{user,onLogout:handleLogout})
-        : e(LoginPage,{onLogin:handleLogin})
+    tab === "student" && e(StudentPage),
+    tab === "teacher" && (
+      user
+        ? e(TeacherPage, { user, onLogout: handleLogout })
+        : e(LoginPage,   { onLogin: handleLogin })
     )
   );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(e(App));
+
 </script>
 </body>
 </html>
