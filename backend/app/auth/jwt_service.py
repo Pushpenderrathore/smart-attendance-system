@@ -3,8 +3,9 @@ JWT Authentication Service
 ──────────────────────────
 ✅ PBKDF2-SHA256 password hashing (stdlib only, no extra deps)
 ✅ Signed JWT-style tokens (1hr expiry)
-✅ Role-based access: 'teacher' | 'student'
+✅ Role-based access: 'teacher'
 ✅ Token blacklist for logout
+✅ All user data persisted in SQLite — no in-memory dict
 """
 import hashlib, hmac, json, os, time, base64, secrets
 
@@ -14,11 +15,16 @@ TOKEN_EXPIRY = 3600  # 1 hour
 _blacklist: set = set()
 
 
+# ── Password hashing ───────────────────────────────────────
+
 def _hash_pw(password: str) -> str:
+    """PBKDF2-SHA256 with a fixed salt. 200k iterations."""
     salt = "sas_salt_v1"
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000)
     return base64.b64encode(dk).decode()
 
+
+# ── Base64 helpers ─────────────────────────────────────────
 
 def _b64e(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
@@ -32,12 +38,7 @@ def _sign(msg: str) -> str:
     return hmac.new(SECRET_KEY.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 
-# Default user store (replace with DB queries in production)
-_users: dict = {
-    "teacher_001": {"name": "Prof. Sharma", "role": "teacher", "password_hash": _hash_pw("teacher123")},
-    "teacher_002": {"name": "Dr. Gupta",    "role": "teacher", "password_hash": _hash_pw("gupta456")},
-}
-
+# ── Token operations ───────────────────────────────────────
 
 def generate_token(user_id: str, role: str) -> str:
     header  = _b64e(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
@@ -66,21 +67,94 @@ def verify_token(token: str) -> tuple:
     return payload, None
 
 
-def login(user_id: str, password: str) -> tuple:
-    user = _users.get(user_id)
-    if not user: return None, "User not found."
-    if not hmac.compare_digest(_hash_pw(password), user["password_hash"]):
-        return None, "Incorrect password."
-    token = generate_token(user_id, user["role"])
-    return token, {"id": user_id, "name": user["name"], "role": user["role"]}
-
-
 def logout(token: str) -> None:
     _blacklist.add(token)
 
 
+# ── DB-backed user operations ──────────────────────────────
+# Import get_db lazily to avoid circular imports at module load time.
+
+def _get_db():
+    from database import get_db
+    return get_db()
+
+
+def login(user_id: str, password: str) -> tuple:
+    """
+    Returns (token, user_dict) on success or (None, None) on failure.
+    Third element is an error string on failure, None on success.
+    Matches the call signature expected by auth.py:
+        token, result = login(user_id, password)
+    So we keep it as a 2-tuple for backward compat:
+        (token_or_None, user_dict_or_error_string)
+    """
+    db = _get_db()
+    try:
+        row = db.execute(
+            "SELECT id, name, role, password_hash FROM teachers WHERE id = ?",
+            (user_id,)
+        ).fetchone()
+    finally:
+        db.close()
+
+    if not row:
+        return None, "User not found."
+    if not hmac.compare_digest(_hash_pw(password), row["password_hash"]):
+        return None, "Incorrect password."
+
+    token = generate_token(row["id"], row["role"])
+    user  = {"id": row["id"], "name": row["name"], "role": row["role"]}
+    return token, user
+
+
 def register_teacher(teacher_id: str, name: str, password: str) -> tuple:
-    if teacher_id in _users:
-        return False, "Teacher ID already exists."
-    _users[teacher_id] = {"name": name, "role": "teacher", "password_hash": _hash_pw(password)}
+    """
+    Persists a new teacher to the DB.
+    Returns (True, "Registered.") or (False, error_message).
+    """
+    db = _get_db()
+    try:
+        existing = db.execute(
+            "SELECT id FROM teachers WHERE id = ?", (teacher_id,)
+        ).fetchone()
+        if existing:
+            return False, "Teacher ID already exists."
+
+        db.execute(
+            "INSERT INTO teachers (id, name, password_hash, role) VALUES (?, ?, ?, 'teacher')",
+            (teacher_id, name, _hash_pw(password))
+        )
+        db.commit()
+    finally:
+        db.close()
+
     return True, "Registered."
+
+
+# ── One-time seed for dev (replaces hardcoded _users) ──────
+# Call this from a setup script, NOT on every app start.
+# Example:
+#   from auth.jwt_service import seed_default_teachers
+#   seed_default_teachers()
+
+def seed_default_teachers():
+    """
+    Seeds the two original hardcoded teachers into the DB.
+    Safe to call multiple times — uses INSERT OR IGNORE.
+    Run once after creating a fresh database.
+    """
+    defaults = [
+        ("teacher_001", "Prof. Sharma", "teacher123"),
+        ("teacher_002", "Dr. Gupta",    "gupta456"),
+    ]
+    db = _get_db()
+    try:
+        for tid, name, pw in defaults:
+            db.execute(
+                "INSERT OR IGNORE INTO teachers (id, name, password_hash, role) VALUES (?, ?, ?, 'teacher')",
+                (tid, name, _hash_pw(pw))
+            )
+        db.commit()
+        print(f"[Auth] Seeded {len(defaults)} default teachers.")
+    finally:
+        db.close()
